@@ -10,18 +10,34 @@ export default function App() {
   // Custom tag settings
   const [selectedCamera, setSelectedCamera] = useState('Camera 1');
   const [tagLabel, setTagLabel] = useState('Goal Scored');
-  const [markerCoords, setMarkerCoords] = useState(null); // { x, y } relative percentage (0-100)
+  const [markerCoords, setMarkerCoords] = useState(null); // { x, y } relative percentage
 
-  // Playback speeds state
-  const [cam1Speed, setCam1Speed] = useState(1.0);
-  const [cam2Speed, setCam2Speed] = useState(1.0);
+  // Collapsible panels state
+  const [isPitchOpen, setIsPitchOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+
+  // Global Video Playback State
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [isMuted, setIsMuted] = useState(true);
+  const [speedIndex, setSpeedIndex] = useState(2); // Index in [0.25, 0.5, 1.0, 2.0]
+  const speedRates = [0.25, 0.5, 1.0, 2.0];
+
+  // AI Co-Pilot Assistant State
+  const [copilotMessages, setCopilotMessages] = useState([
+    {
+      id: 'welcome',
+      text: 'AI Assistant Initialized. Standing by to analyze match telemetry, track tactical formations, and stream live play commentary. Select pitch coordinates below to log spatial data.',
+      timestamp: new Date().toLocaleTimeString(),
+      event: 'SYSTEM'
+    }
+  ]);
+  const [isTyping, setIsTyping] = useState(false);
 
   // VideoPlayer refs for DOM manipulation
   const cam1Ref = useRef(null);
   const cam2Ref = useRef(null);
-
   const socketRef = useRef(null);
-  const eventsEndRef = useRef(null);
+  const timelineEndRef = useRef(null);
 
   // Fetch highlights on mount
   const fetchHighlights = async () => {
@@ -36,6 +52,46 @@ export default function App() {
     } catch (error) {
       console.error('Error fetching highlights:', error);
     }
+  };
+
+  // Simulate streaming text word-by-word (AI Co-Pilot)
+  const streamAICopilotCommentary = (eventMessage) => {
+    setIsTyping(true);
+    
+    const analysisPool = {
+      "Point scored!": "AI Analysis: Goal scoring opportunity detected. Attack initiated from the left flank, overloading the box. Defensive structure collapsed under rapid horizontal ball progression.",
+      "Foul detected": "AI Analysis: Tactical foul observed in the mid-pitch transition zone. Structural integrity preserved by disrupting play. Recommending card assessment for persistent infraction.",
+      "Highlight clipped!": "AI Analysis: Frame-sequence analysis captured. System cache updated with coordinates. Tracking spatial distribution of midfielders at the instant of clip.",
+      "Goal! Exciting play!": "AI Analysis: SPECTACULAR FINISH! Forward pocket exploited. Ball trajectory: 24m/s, curve deviation: 8%. Defensive line positioning was 1.4 meters too deep.",
+      "Yellow card issued": "AI Analysis: Discipline alert. Key central defender now cautioned. This alters high-press threshold. Recommend shifting coverage to avoid second booking.",
+      "Timeout called by Coach": "AI Analysis: Tactical pause. Teams resetting defensive lines. Statistical heatmaps indicate heavy congestion in zone 14. Adjustments expected in wide channels.",
+      "Spectacular save by Goalkeeper!": "AI Analysis: Incredible reaction speed (0.18s). Shot stopping efficiency rated at 94.5%. Defense recovery was slow, exposing the second post.",
+      "Substitution in progress": "AI Analysis: Personnel modification. Fresh legs in the attacking third. Anticipating high-intensity counter-pressing in the final 15 minutes."
+    };
+
+    const defaultAnalysis = `AI Analysis: Live game event detected: "${eventMessage}". Updating tactical heatmaps and team positioning statistics in real-time.`;
+    const fullText = analysisPool[eventMessage] || defaultAnalysis;
+
+    const words = fullText.split(' ');
+    let currentText = '';
+    let wordIndex = 0;
+    const msgId = Math.random().toString();
+
+    setCopilotMessages(prev => [
+      { id: msgId, text: '', timestamp: new Date().toLocaleTimeString(), event: eventMessage },
+      ...prev
+    ].slice(0, 15)); // Keep last 15 messages
+
+    const timer = setInterval(() => {
+      if (wordIndex < words.length) {
+        currentText += (wordIndex === 0 ? '' : ' ') + words[wordIndex];
+        setCopilotMessages(prev => prev.map(m => m.id === msgId ? { ...m, text: currentText } : m));
+        wordIndex++;
+      } else {
+        clearInterval(timer);
+        setIsTyping(false);
+      }
+    }, 80);
   };
 
   useEffect(() => {
@@ -57,15 +113,20 @@ export default function App() {
 
     // Listen for live ticker events
     socket.on('live-game-event', (data) => {
+      const eventMsg = data.message;
       setLiveEvents((prev) => [
         {
           id: Math.random().toString(),
-          message: data.message,
+          message: eventMsg,
           timestamp: data.timestamp || new Date().toLocaleTimeString(),
+          rawTime: Date.now(),
           type: 'live'
         },
         ...prev
-      ].slice(0, 30)); // Limit to last 30 items
+      ].slice(0, 30));
+
+      // Trigger AI Co-Pilot commentary streaming
+      streamAICopilotCommentary(eventMsg);
     });
 
     // Listen for broadcasted moment-tagged events from any client
@@ -74,18 +135,18 @@ export default function App() {
         ? ` (Pitch Pos: X:${data.coordinates.x}%, Y:${data.coordinates.y}%)` 
         : '';
       
-      // Add visual notification in rolling feed
       setLiveEvents((prev) => [
         {
           id: Math.random().toString(),
           message: `🎯 [USER TAG] Moment tagged: "${data.label}" on ${data.camera}${coordStr}!`,
           timestamp: data.timestamp,
+          rawTime: Date.now(),
           type: 'tag'
         },
         ...prev
       ].slice(0, 30));
 
-      // Refresh highlights from DB
+      streamAICopilotCommentary(`Highlight Clipped: "${data.label}"`);
       fetchHighlights();
     });
 
@@ -103,17 +164,15 @@ export default function App() {
       timestamp: localizedTimestamp,
       label: tagLabel,
       camera: selectedCamera,
-      coordinates: markerCoords // Send captured X/Y coordinates
+      coordinates: markerCoords
     };
 
     console.log('Tagging moment:', payload);
 
-    // 1. Emit socket event
     if (socketRef.current) {
       socketRef.current.emit('tag-moment', payload);
     }
 
-    // 2. REST POST to MongoDB
     try {
       const response = await fetch('/api/highlights', {
         method: 'POST',
@@ -126,7 +185,6 @@ export default function App() {
       if (response.ok) {
         const savedHighlight = await response.json();
         console.log('Saved highlight in DB:', savedHighlight);
-        // Clear tactical map coordinate selection upon successful tag
         setMarkerCoords(null);
         fetchHighlights();
       } else {
@@ -137,35 +195,51 @@ export default function App() {
     }
   };
 
-  // Speed adjust handler
-  const handleSpeedChange = (camIndex, rate) => {
-    if (camIndex === 1) {
-      setCam1Speed(rate);
-      if (cam1Ref.current) {
-        cam1Ref.current.setPlaybackRate(rate);
-      }
+  // Global Toggle Play / Pause
+  const handleTogglePlay = () => {
+    const nextPlaying = !isPlaying;
+    setIsPlaying(nextPlaying);
+    
+    if (nextPlaying) {
+      if (cam1Ref.current) cam1Ref.current.play();
+      if (cam2Ref.current) cam2Ref.current.play();
     } else {
-      setCam2Speed(rate);
-      if (cam2Ref.current) {
-        cam2Ref.current.setPlaybackRate(rate);
-      }
+      if (cam1Ref.current) cam1Ref.current.pause();
+      if (cam2Ref.current) cam2Ref.current.pause();
     }
   };
 
-  // Interactive SVG pitch click handler
+  // Global Toggle Mute / Unmute
+  const handleToggleMute = () => {
+    const nextMuted = !isMuted;
+    setIsMuted(nextMuted);
+    if (cam1Ref.current) cam1Ref.current.setMuted(nextMuted);
+    if (cam2Ref.current) cam2Ref.current.setMuted(nextMuted);
+  };
+
+  // Global Speed Slider adjustment
+  const handleSpeedIndexChange = (e) => {
+    const index = parseInt(e.target.value);
+    setSpeedIndex(index);
+    const rate = speedRates[index];
+    
+    if (cam1Ref.current) cam1Ref.current.setPlaybackRate(rate);
+    if (cam2Ref.current) cam2Ref.current.setPlaybackRate(rate);
+  };
+
+  // Interactive Pitch click coordinates mapping
   const handleFieldClick = (e) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const rawX = e.clientX - rect.left;
     const rawY = e.clientY - rect.top;
     
-    // Normalize coordinates to percentage 0-100
     const xPercent = Math.round((rawX / rect.width) * 100);
     const yPercent = Math.round((rawY / rect.height) * 100);
     
     setMarkerCoords({ x: xPercent, y: yPercent });
   };
 
-  // Local state metrics compiler for header metrics bar
+  // Local state metrics compiler
   const goalsCount = highlights.filter(h => h.label.toLowerCase().includes('goal')).length;
   const foulsCount = highlights.filter(h => h.label.toLowerCase().includes('foul')).length;
   const cardsCount = highlights.filter(h => 
@@ -174,26 +248,61 @@ export default function App() {
     h.label.toLowerCase().includes('red')
   ).length;
 
+  // Chronological incident timeline mapper (sorted combined timeline)
+  const getCombinedTimeline = () => {
+    const mappedHighlights = highlights.map(h => ({
+      id: h._id || h.createdAt,
+      type: 'tag',
+      badge: 'USER TAG',
+      timestamp: h.timestamp,
+      message: `Moment Tagged: "${h.label}" on ${h.camera}`,
+      rawTime: new Date(h.createdAt || Date.now()).getTime(),
+      coordinates: h.coordinates
+    }));
+
+    const mappedLive = liveEvents.map(e => ({
+      id: e.id,
+      type: 'match',
+      badge: 'MATCH EVENT',
+      timestamp: e.timestamp,
+      message: e.message,
+      rawTime: e.rawTime || Date.now(),
+      coordinates: null
+    }));
+
+    const combined = [...mappedHighlights, ...mappedLive];
+    // Sort descending (most recent first)
+    combined.sort((a, b) => b.rawTime - a.rawTime);
+    return combined;
+  };
+
+  const combinedTimeline = getCombinedTimeline();
+
   return (
     <div className="dashboard-container">
-      {/* Header */}
+      {/* Top App Bar */}
       <header className="dashboard-header">
         <div className="header-title-section">
+          <div className="logo-container">
+            <div className="logo-dot"></div>
+            FIELDVISION.AI
+          </div>
           <div className="live-badge">
             <div className="live-dot"></div>
-            LIVE
+            LIVE STREAM
           </div>
-          <h1 className="header-title">SPORTS REPLAY STUDIO</h1>
         </div>
         
-        {/* WebSocket Connection Status */}
-        <div className="connection-status">
-          <span className={`status-indicator ${isConnected ? 'connected' : 'disconnected'}`}></span>
-          <span>WebSocket: {isConnected ? 'Connected' : 'Connecting...'}</span>
+        <div className="header-actions">
+          <div className="connection-status">
+            <span className={`status-indicator ${isConnected ? 'connected' : 'disconnected'}`}></span>
+            <span>WebSocket: {isConnected ? 'Connected' : 'Disconnected'}</span>
+          </div>
+          <div className="user-profile" title="User Profile">JD</div>
         </div>
       </header>
 
-      {/* Telemetry Counter Metrics Bar */}
+      {/* Metric Banner Block */}
       <div className="telemetry-bar">
         <div className="telemetry-card">
           <span className="telemetry-icon">⚽</span>
@@ -203,249 +312,301 @@ export default function App() {
           </div>
         </div>
         <div className="telemetry-card">
-          <span className="telemetry-icon" style={{ color: 'var(--accent-cyan)' }}>⚠️</span>
+          <span className="telemetry-icon">⚠️</span>
           <div className="telemetry-info">
             <span className="telemetry-val">{foulsCount}</span>
             <span className="telemetry-lbl">Fouls Tagged</span>
           </div>
         </div>
         <div className="telemetry-card">
-          <span className="telemetry-icon" style={{ color: 'var(--accent-red)' }}>🟥</span>
+          <span className="telemetry-icon">🟥</span>
           <div className="telemetry-info">
             <span className="telemetry-val">{cardsCount}</span>
             <span className="telemetry-lbl">Cards Tagged</span>
           </div>
         </div>
         <div className="telemetry-card">
-          <span className="telemetry-icon" style={{ color: 'var(--text-primary)' }}>💾</span>
+          <span className="telemetry-icon">💾</span>
           <div className="telemetry-info">
             <span className="telemetry-val">{highlights.length}</span>
-            <span className="telemetry-lbl">Total Replays</span>
+            <span className="telemetry-lbl">Cached Replays</span>
           </div>
         </div>
       </div>
 
-      {/* Grid */}
-      <div className="dashboard-grid">
-        {/* Left Column: Video & Tag Controls */}
+      {/* Main Workspace Layout */}
+      <div className={`dashboard-grid ${!isSidebarOpen ? 'collapsed-right' : ''}`}>
+        
+        {/* Left Column: Videos, Actions & Pitch */}
         <div className="left-column">
           
-          {/* Dual Video Players */}
+          {/* Dual Video Workspace */}
           <div className="videos-grid">
             <VideoPlayer 
               ref={cam1Ref}
               src="https://bitdash-a.akamaihd.net/content/MI201109210084_1/m3u8s/f08e80da-bf1d-4e3d-8899-f0f6155f6efa.m3u8" 
-              title="Camera 1 - Feed" 
-              cameraName="Stream 1 (Red Bull Action Sports)"
+              title="Camera 1" 
+              cameraName="Primary Wide Angle"
             />
             <VideoPlayer 
               ref={cam2Ref}
               src="http://sample.vodobox.net/skate_phantom_flex_4k/skate_phantom_flex_4k.m3u8" 
-              title="Camera 2 - Feed" 
-              cameraName="Stream 2 (Skateboard Phantom Flex)"
+              title="Camera 2" 
+              cameraName="Tactical Close Stream"
             />
           </div>
 
-          {/* Interactive Playback Speed Controllers Row */}
-          <div className="speed-controllers-container">
-            <div className="speed-controller-card">
-              <span className="speed-label">Camera 1 Rate:</span>
-              <div className="speed-buttons">
-                {[0.25, 0.5, 1.0, 2.0].map((rate) => (
-                  <button 
-                    key={rate} 
-                    className={`speed-btn ${cam1Speed === rate ? 'active' : ''}`}
-                    onClick={() => handleSpeedChange(1, rate)}
-                  >
-                    {rate}x
-                  </button>
-                ))}
-              </div>
-            </div>
-            
-            <div className="speed-controller-card">
-              <span className="speed-label">Camera 2 Rate:</span>
-              <div className="speed-buttons">
-                {[0.25, 0.5, 1.0, 2.0].map((rate) => (
-                  <button 
-                    key={rate} 
-                    className={`speed-btn ${cam2Speed === rate ? 'active' : ''}`}
-                    onClick={() => handleSpeedChange(2, rate)}
-                  >
-                    {rate}x
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Central Tag Control Panel with Tactical Field Map */}
-          <div className="tag-controller-section" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', alignItems: 'start' }}>
-            
-            {/* Input & Form Configurations */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', height: '100%', justifyContent: 'center' }}>
-              <div className="tag-option-group">
-                <span className="tag-option-label">Select Active Camera</span>
-                <select 
-                  className="tag-select" 
-                  value={selectedCamera} 
-                  onChange={(e) => setSelectedCamera(e.target.value)}
-                >
-                  <option value="Camera 1">Camera 1 (Wide)</option>
-                  <option value="Camera 2">Camera 2 (Zoom)</option>
-                  <option value="Multi-Angle">Multi-Angle</option>
-                </select>
-              </div>
-
-              <div className="tag-option-group">
-                <span className="tag-option-label">Incident Type</span>
-                <select 
-                  className="tag-select" 
-                  value={tagLabel} 
-                  onChange={(e) => setTagLabel(e.target.value)}
-                >
-                  <option value="Goal Scored">⚽ Goal Scored</option>
-                  <option value="Foul Committed">⚠️ Foul Committed</option>
-                  <option value="Yellow Card">🟨 Yellow Card</option>
-                  <option value="Red Card">🟥 Red Card</option>
-                  <option value="Amazing Save">🧤 Amazing Save</option>
-                  <option value="Offside Call">🚩 Offside Call</option>
-                  <option value="Substitution">🔄 Substitution</option>
-                </select>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.5rem' }}>
-                <span className="tag-option-label" style={{ color: 'var(--accent-cyan)' }}>
-                  Coordinate Lock:
-                </span>
-                <span style={{ fontSize: '0.85rem', color: markerCoords ? 'var(--text-primary)' : 'var(--text-muted)' }}>
-                  {markerCoords ? `⚽ Pitch Position Selected: (X: ${markerCoords.x}%, Y: ${markerCoords.y}%)` : '⚠️ Click the field on the right to set coordinates'}
-                </span>
-              </div>
-
-              <button className="tag-button" onClick={handleTagMoment} style={{ marginTop: '0.5rem', width: '100%', justifyContent: 'center' }}>
-                🚨 TAG MOMENT
+          {/* Consolidated Playback Rail */}
+          <div className="playback-rail-card">
+            <div className="playback-controls">
+              <button 
+                className={`playback-btn ${isPlaying ? 'active' : ''}`} 
+                onClick={handleTogglePlay}
+                title={isPlaying ? "Pause Stream" : "Play Stream"}
+              >
+                {isPlaying ? '⏸ Pause' : '▶ Play'}
+              </button>
+              <button 
+                className={`playback-btn ${!isMuted ? 'active' : ''}`} 
+                onClick={handleToggleMute}
+                title={isMuted ? "Unmute Feed" : "Mute Feed"}
+              >
+                {isMuted ? '🔇 Muted' : '🔊 Unmuted'}
               </button>
             </div>
 
-            {/* Interactive SVG Tactical Pitch Coordinate Map */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              <span className="tag-option-label" style={{ textAlign: 'center' }}>Tactical Pitch Coordinates</span>
-              <div style={{ position: 'relative', width: '100%' }}>
-                <svg 
-                  viewBox="0 0 100 60" 
-                  className="field-interactive" 
-                  style={{ 
-                    width: '100%', 
-                    height: 'auto', 
-                    background: 'rgba(0, 242, 254, 0.02)', 
-                    borderRadius: '10px', 
-                    border: '1.5px dashed rgba(0, 242, 254, 0.25)', 
-                    cursor: 'crosshair',
-                    transition: 'all 0.2s ease'
-                  }} 
-                  onClick={handleFieldClick}
-                >
-                  {/* Pitch Border */}
-                  <rect x="1" y="1" width="98" height="58" fill="none" stroke="rgba(255, 255, 255, 0.25)" strokeWidth="1" />
-                  
-                  {/* Center Pitch Line */}
-                  <line x1="50" y1="1" x2="50" y2="59" stroke="rgba(255, 255, 255, 0.25)" strokeWidth="1" />
-                  
-                  {/* Center Circle */}
-                  <circle cx="50" cy="30" r="10" fill="none" stroke="rgba(255, 255, 255, 0.25)" strokeWidth="1" />
-                  <circle cx="50" cy="30" r="0.8" fill="rgba(255, 255, 255, 0.5)" />
-
-                  {/* Left & Right Goal Areas */}
-                  <rect x="1" y="20" width="5" height="20" fill="none" stroke="rgba(255, 255, 255, 0.25)" strokeWidth="1" />
-                  <rect x="94" y="20" width="5" height="20" fill="none" stroke="rgba(255, 255, 255, 0.25)" strokeWidth="1" />
-
-                  {/* Left & Right Penalty Box Areas */}
-                  <rect x="1" y="10" width="13" height="40" fill="none" stroke="rgba(255, 255, 255, 0.25)" strokeWidth="1" />
-                  <rect x="86" y="10" width="13" height="40" fill="none" stroke="rgba(255, 255, 255, 0.25)" strokeWidth="1" />
-                  
-                  {/* Corner Arcs */}
-                  <path d="M 1,4 A 3,3 0 0,0 4,1" fill="none" stroke="rgba(255, 255, 255, 0.15)" strokeWidth="0.8" />
-                  <path d="M 96,1 A 3,3 0 0,0 99,4" fill="none" stroke="rgba(255, 255, 255, 0.15)" strokeWidth="0.8" />
-                  <path d="M 4,59 A 3,3 0 0,0 1,56" fill="none" stroke="rgba(255, 255, 255, 0.15)" strokeWidth="0.8" />
-                  <path d="M 99,56 A 3,3 0 0,0 96,59" fill="none" stroke="rgba(255, 255, 255, 0.15)" strokeWidth="0.8" />
-
-                  {/* Selected Spot glowing crosshair cross */}
-                  {markerCoords && (
-                    <g>
-                      <circle cx={markerCoords.x} cy={markerCoords.y} r="3" fill="var(--accent-red)" className="glowing-coordinate-marker" />
-                      <circle cx={markerCoords.x} cy={markerCoords.y} r="7" fill="none" stroke="var(--accent-red)" strokeWidth="1" opacity="0.8" />
-                      <line x1={markerCoords.x - 12} y1={markerCoords.y} x2={markerCoords.x + 12} y2={markerCoords.y} stroke="var(--accent-red)" strokeWidth="0.6" opacity="0.6" />
-                      <line x1={markerCoords.x} y1={markerCoords.y - 12} x2={markerCoords.x} y2={markerCoords.y + 12} stroke="var(--accent-red)" strokeWidth="0.6" opacity="0.6" />
-                    </g>
-                  )}
-                </svg>
+            {/* Shared Horizontal Speed Slider */}
+            <div className="speed-slider-container">
+              <span className="speed-slider-label">PLAYBACK RATE</span>
+              <div className="speed-slider-wrap">
+                <input 
+                  type="range" 
+                  min="0" 
+                  max="3" 
+                  step="1"
+                  value={speedIndex} 
+                  onChange={handleSpeedIndexChange}
+                  className="speed-range-input" 
+                />
+                <div className="speed-ticks">
+                  {speedRates.map((rate, i) => (
+                    <span 
+                      key={rate} 
+                      className={`speed-tick ${speedIndex === i ? 'active' : ''}`}
+                      onClick={() => handleSpeedIndexChange({ target: { value: i } })}
+                    >
+                      {rate}x
+                    </span>
+                  ))}
+                </div>
               </div>
             </div>
 
+            <div className="playback-meta-pill">
+              SPEED: {speedRates[speedIndex]}x
+            </div>
           </div>
 
-          {/* Saved Clip History Panel */}
-          <div className="history-section">
-            <div className="section-header">
-              <h2 className="section-title">Saved Replays & Highlights</h2>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                {highlights.length} clips recorded
-              </span>
+          {/* Spatial Coordinates Field (Tactical Pitch Drawer) */}
+          <div className={`tactical-pitch-panel ${isPitchOpen ? 'expanded' : 'collapsed'}`}>
+            <div className="panel-header">
+              <h2 className="panel-title">⚽ Spatial Coordinates Pitch Field</h2>
+              <button 
+                className="panel-toggle-btn"
+                onClick={() => setIsPitchOpen(!isPitchOpen)}
+              >
+                {isPitchOpen ? '▼ Hide Pitch' : '▲ Show Pitch'}
+              </button>
             </div>
 
-            <div className="highlights-scroll-panel">
-              {highlights.length === 0 ? (
-                <div className="no-data">No highlights tagged yet. Click the RED button to record.</div>
-              ) : (
-                highlights.map((clip) => (
-                  <div key={clip._id || clip.createdAt} className="highlight-item" style={{ gridTemplateColumns: '80px 100px 1fr 140px 120px' }}>
-                    <span className="highlight-camera">{clip.camera}</span>
-                    <span className="highlight-time">⏱ {clip.timestamp}</span>
-                    <span className="highlight-label">{clip.label}</span>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                      {clip.coordinates ? `📍 Pos: (${clip.coordinates.x}%, ${clip.coordinates.y}%)` : '📍 Center Field'}
-                    </span>
-                    <span className="highlight-meta-time">
-                      {new Date(clip.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+            {isPitchOpen && (
+              <div className="pitch-content-grid">
+                
+                {/* Form configuration */}
+                <div className="pitch-form">
+                  <div className="form-row">
+                    <div className="tag-option-group">
+                      <span className="tag-option-label">Active Camera</span>
+                      <select 
+                        className="tag-select" 
+                        value={selectedCamera} 
+                        onChange={(e) => setSelectedCamera(e.target.value)}
+                      >
+                        <option value="Camera 1">Camera 1 (Wide)</option>
+                        <option value="Camera 2">Camera 2 (Tactical)</option>
+                        <option value="Multi-Angle">Multi-Angle Stream</option>
+                      </select>
+                    </div>
+
+                    <div className="tag-option-group">
+                      <span className="tag-option-label">Incident Classification</span>
+                      <select 
+                        className="tag-select" 
+                        value={tagLabel} 
+                        onChange={(e) => setTagLabel(e.target.value)}
+                      >
+                        <option value="Goal Scored">⚽ Goal Scored</option>
+                        <option value="Foul Committed">⚠️ Foul Committed</option>
+                        <option value="Yellow Card">🟨 Yellow Card</option>
+                        <option value="Red Card">🟥 Red Card</option>
+                        <option value="Amazing Save">🧤 Amazing Save</option>
+                        <option value="Offside Call">🚩 Offside Call</option>
+                        <option value="Substitution">🔄 Substitution</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="coordinate-lock-info">
+                    <span style={{ fontSize: '12px' }}>📍</span>
+                    <span style={{ fontWeight: '500' }}>
+                      {markerCoords 
+                        ? `Locked: X: ${markerCoords.x}%, Y: ${markerCoords.y}%` 
+                        : 'Select coords by clicking on the pitch'}
                     </span>
                   </div>
-                ))
-              )}
-            </div>
+
+                  <button className="tag-button" onClick={handleTagMoment}>
+                    🚨 COMMIT MOMENT DATA
+                  </button>
+                </div>
+
+                {/* Minimalist vector pitch field */}
+                <div className="pitch-vector-container">
+                  <svg 
+                    viewBox="0 0 100 60" 
+                    className="field-interactive" 
+                    onClick={handleFieldClick}
+                  >
+                    {/* Pitch Outer border */}
+                    <rect x="2" y="2" width="96" height="56" fill="none" stroke="#ffffff" strokeWidth="1.5" />
+                    
+                    {/* Halfway Line */}
+                    <line x1="50" y1="2" x2="50" y2="58" stroke="#ffffff" strokeWidth="1.5" />
+                    
+                    {/* Center Circle & Center Spot */}
+                    <circle cx="50" cy="30" r="10" fill="none" stroke="#ffffff" strokeWidth="1.5" />
+                    <circle cx="50" cy="30" r="1" fill="#ffffff" />
+
+                    {/* Left & Right Goal Boxes */}
+                    <rect x="2" y="20" width="6" height="20" fill="none" stroke="#ffffff" strokeWidth="1.5" />
+                    <rect x="92" y="20" width="6" height="20" fill="none" stroke="#ffffff" strokeWidth="1.5" />
+
+                    {/* Left & Right Penalty Box Areas */}
+                    <rect x="2" y="10" width="14" height="40" fill="none" stroke="#ffffff" strokeWidth="1.5" />
+                    <rect x="84" y="10" width="14" height="40" fill="none" stroke="#ffffff" strokeWidth="1.5" />
+                    
+                    {/* Left & Right Penalty Spots */}
+                    <circle cx="12" cy="30" r="0.8" fill="#ffffff" />
+                    <circle cx="88" cy="30" r="0.8" fill="#ffffff" />
+
+                    {/* Left & Right Goal lines */}
+                    <line x1="2" y1="26" x2="2" y2="34" stroke="var(--accent-indigo)" strokeWidth="2.5" />
+                    <line x1="98" y1="26" x2="98" y2="34" stroke="var(--accent-indigo)" strokeWidth="2.5" />
+
+                    {/* Render coordinate marker node */}
+                    {markerCoords && (
+                      <g className="glowing-coordinate-marker">
+                        <circle cx={markerCoords.x} cy={markerCoords.y} r="2.5" fill="var(--accent-rose)" />
+                        <circle cx={markerCoords.x} cy={markerCoords.y} r="6" fill="none" stroke="var(--accent-rose)" strokeWidth="1" opacity="0.7" />
+                        <line x1={markerCoords.x - 10} y1={markerCoords.y} x2={markerCoords.x + 10} y2={markerCoords.y} stroke="var(--accent-rose)" strokeWidth="0.5" opacity="0.5" />
+                        <line x1={markerCoords.x} y1={markerCoords.y - 10} x2={markerCoords.x} y2={markerCoords.y + 10} stroke="var(--accent-rose)" strokeWidth="0.5" opacity="0.5" />
+                      </g>
+                    )}
+                  </svg>
+                </div>
+
+              </div>
+            )}
           </div>
 
         </div>
 
-        {/* Right Column: WebSocket Rolling Ticker Feed */}
-        <aside className="right-column">
-          <div className="ticker-title-section">
-            <h2 className="section-title" style={{ color: 'var(--accent-cyan)' }}>Live Game Ticker</h2>
-            <div className="live-dot"></div>
-          </div>
+        {/* Right Column: Collapsible Intelligence Sidebar */}
+        {isSidebarOpen ? (
+          <aside className="right-column-sidebar">
+            {/* Sidebar toggle button (collapses sidebar) */}
+            <div 
+              className="sidebar-toggle-handle" 
+              onClick={() => setIsSidebarOpen(false)}
+              title="Hide Intelligence Column"
+            >
+              ▶
+            </div>
 
-          <div className="ticker-feed">
-            {liveEvents.length === 0 ? (
-              <div className="no-data">Waiting for live match data ticker...</div>
-            ) : (
-              liveEvents.map((ev) => (
-                <div 
-                  key={ev.id} 
-                  className={`ticker-item ${ev.type === 'tag' ? 'tag-broadcast' : ''}`}
-                >
-                  <div className="ticker-meta">
-                    <span className="ticker-badge">
-                      {ev.type === 'tag' ? '📢 TAGGED EVENT' : '⚽ MATCH EVENT'}
-                    </span>
-                    <span className="ticker-time">{ev.timestamp}</span>
+            {/* AI Co-Pilot Live Assistant */}
+            <div className="ai-copilot-panel">
+              <div className="panel-header">
+                <h2 className="panel-title">🤖 AI CO-PILOT LIVE ASSISTANT</h2>
+                {isTyping && (
+                  <span className="ai-streaming-indicator">
+                    <span className="ai-stream-dot"></span>
+                    <span className="ai-stream-dot"></span>
+                    <span className="ai-stream-dot"></span>
+                  </span>
+                )}
+              </div>
+              
+              <div className="ai-assistant-body">
+                {copilotMessages.map((msg) => (
+                  <div key={msg.id} className="ai-message-bubble">
+                    <div className="ai-message-header">
+                      <span>{msg.event} ANALYSIS</span>
+                      <span>{msg.timestamp}</span>
+                    </div>
+                    <div>{msg.text}</div>
                   </div>
-                  <div className="ticker-message">{ev.message}</div>
-                </div>
-              ))
-            )}
-            <div ref={eventsEndRef} />
+                ))}
+              </div>
+            </div>
+
+            {/* Chronological Incident Timeline */}
+            <div className="timeline-panel">
+              <div className="panel-header">
+                <h2 className="panel-title">📋 LIVE INCIDENT TIMELINE</h2>
+              </div>
+              
+              <div className="timeline-scroll-feed">
+                {combinedTimeline.length === 0 ? (
+                  <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
+                    No events tracked yet.
+                  </div>
+                ) : (
+                  combinedTimeline.map((item) => (
+                    <div 
+                      key={item.id} 
+                      className={`timeline-item ${item.type === 'tag' ? 'user-tag' : 'match-event'}`}
+                    >
+                      <div className="timeline-meta">
+                        <span className={`timeline-badge ${item.type === 'tag' ? 'user' : 'match'}`}>
+                          {item.badge}
+                        </span>
+                        <span>{item.timestamp}</span>
+                      </div>
+                      <div className="timeline-message">{item.message}</div>
+                      {item.coordinates && (
+                        <div className="timeline-extra">
+                          <span>📍 Coords: X: {item.coordinates.x}%, Y: {item.coordinates.y}%</span>
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+                <div ref={timelineEndRef} />
+              </div>
+            </div>
+
+          </aside>
+        ) : (
+          /* Floating button when sidebar is collapsed */
+          <div 
+            className="sidebar-toggle-floating" 
+            onClick={() => setIsSidebarOpen(true)}
+            title="Expand Intelligence Column"
+          >
+            <span>◀</span> AI Co-Pilot Feed
           </div>
-        </aside>
+        )}
+
       </div>
     </div>
   );

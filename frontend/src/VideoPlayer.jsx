@@ -9,12 +9,31 @@ const VideoPlayer = forwardRef(({ src, title, cameraName }, ref) => {
   const [hasError, setHasError] = useState(false);
   const [currentSpeed, setCurrentSpeed] = useState(1.0);
 
-  // Expose playback functions to parent components via ref
+  // Expose playback control functions to parent component via ref
   useImperativeHandle(ref, () => ({
+    play: () => {
+      if (videoRef.current) {
+        videoRef.current.play()
+          .then(() => setIsPlaying(true))
+          .catch((err) => console.log(`Play request failed for ${title}:`, err));
+      }
+    },
+    pause: () => {
+      if (videoRef.current) {
+        videoRef.current.pause();
+        setIsPlaying(false);
+      }
+    },
     setPlaybackRate: (rate) => {
       if (videoRef.current) {
         videoRef.current.playbackRate = rate;
         setCurrentSpeed(rate);
+      }
+    },
+    setMuted: (muted) => {
+      if (videoRef.current) {
+        videoRef.current.muted = muted;
+        setIsMuted(muted);
       }
     },
     getPlaybackRate: () => {
@@ -42,15 +61,18 @@ const VideoPlayer = forwardRef(({ src, title, cameraName }, ref) => {
       hls.attachMedia(video);
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        // Apply default mute and autoplay
+        video.muted = isMuted;
+        video.playbackRate = currentSpeed;
         video.play()
           .then(() => setIsPlaying(true))
           .catch((err) => {
-            console.log("Autoplay was blocked by browser. Starting in muted mode.", err);
+            console.log("Autoplay blocked. Retrying in muted mode.", err);
             video.muted = true;
             setIsMuted(true);
             video.play()
               .then(() => setIsPlaying(true))
-              .catch((playErr) => console.error("Play failed even when muted:", playErr));
+              .catch((playErr) => console.error("Muted play failed:", playErr));
           });
       });
 
@@ -59,15 +81,15 @@ const VideoPlayer = forwardRef(({ src, title, cameraName }, ref) => {
         if (data.fatal) {
           switch (data.type) {
             case Hls.ErrorTypes.NETWORK_ERROR:
-              console.log('Fatal network error encountered, attempting to recover...');
+              console.log('Attempting network error recovery...');
               hls.startLoad();
               break;
             case Hls.ErrorTypes.MEDIA_ERROR:
-              console.log('Fatal media error encountered, attempting to recover...');
+              console.log('Attempting media error recovery...');
               hls.recoverMediaError();
               break;
             default:
-              console.error('Fatal unrecoverable HLS error');
+              console.error('Unrecoverable HLS error');
               setHasError(true);
               hls.destroy();
               break;
@@ -84,11 +106,13 @@ const VideoPlayer = forwardRef(({ src, title, cameraName }, ref) => {
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       // Native Apple HLS support (Safari / iOS)
       video.src = src;
+      video.muted = isMuted;
+      video.playbackRate = currentSpeed;
       video.addEventListener('loadedmetadata', () => {
         video.play()
           .then(() => setIsPlaying(true))
           .catch((err) => {
-            console.log("Native autoplay blocked. Starting muted.", err);
+            console.log("Native autoplay blocked. Retrying muted.", err);
             video.muted = true;
             setIsMuted(true);
             video.play()
@@ -102,53 +126,51 @@ const VideoPlayer = forwardRef(({ src, title, cameraName }, ref) => {
     }
   }, [src, title]);
 
-  const toggleMute = () => {
-    if (videoRef.current) {
-      const nextMute = !videoRef.current.muted;
-      videoRef.current.muted = nextMute;
-      setIsMuted(nextMute);
-    }
-  };
-
-  const togglePlay = () => {
-    if (videoRef.current) {
-      if (isPlaying) {
-        videoRef.current.pause();
-        setIsPlaying(false);
-      } else {
-        videoRef.current.play()
-          .then(() => setIsPlaying(true))
-          .catch(err => console.error("Play execution failed:", err));
-      }
-    }
-  };
-
   return (
     <div className="video-card">
       <div className="video-header">
-        <span className="video-title">{title}</span>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginRight: '0.25rem' }}>
-            {cameraName}
-          </span>
+        <div className="video-title-wrap">
+          <span className="video-title">{title}</span>
+          <span className="video-camera-desc">({cameraName})</span>
+        </div>
+        <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+          {isPlaying ? (
+            <span style={{ 
+              fontSize: '9px', 
+              color: 'var(--accent-emerald)', 
+              background: 'rgba(16, 185, 129, 0.1)', 
+              padding: '2px 6px', 
+              borderRadius: '10px',
+              fontWeight: '700',
+              letterSpacing: '0.05em'
+            }}>
+              LIVE FEED
+            </span>
+          ) : (
+            <span style={{ 
+              fontSize: '9px', 
+              color: 'var(--text-muted)', 
+              background: 'var(--bg-hover)', 
+              padding: '2px 6px', 
+              borderRadius: '10px',
+              fontWeight: '700',
+              letterSpacing: '0.05em'
+            }}>
+              PAUSED
+            </span>
+          )}
           {currentSpeed !== 1.0 && (
             <span style={{ 
-              fontSize: '0.7rem', 
-              color: 'var(--accent-cyan)', 
-              background: 'rgba(0, 242, 254, 0.1)', 
-              padding: '0.1rem 0.3rem', 
-              borderRadius: '4px',
+              fontSize: '9px', 
+              color: 'var(--accent-indigo)', 
+              background: 'rgba(99, 102, 241, 0.1)', 
+              padding: '2px 6px', 
+              borderRadius: '10px',
               fontWeight: '700'
             }}>
               ⚡ {currentSpeed}x
             </span>
           )}
-          <button className="mute-overlay-btn" onClick={togglePlay}>
-            {isPlaying ? '⏸ Pause' : '▶ Play'}
-          </button>
-          <button className="mute-overlay-btn" onClick={toggleMute}>
-            {isMuted ? '🔇 Unmute' : '🔊 Muted'}
-          </button>
         </div>
       </div>
       <div className="video-player-wrapper">
@@ -160,19 +182,20 @@ const VideoPlayer = forwardRef(({ src, title, cameraName }, ref) => {
             width: '100%',
             height: '100%',
             display: 'flex',
+            flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
-            background: 'rgba(26, 30, 42, 0.9)',
-            color: 'var(--accent-red)',
-            fontSize: '0.85rem',
-            fontFamily: 'var(--font-display)',
+            background: 'var(--bg-hover)',
+            color: 'var(--accent-rose)',
+            fontSize: '11px',
             textAlign: 'center',
             padding: '1rem',
             lineHeight: '1.6'
           }}>
-            ❌ STREAM OFFLINE OR UNSUPPORTED<br/>
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-              ({src.substring(0, 45)}...)
+            <span style={{ fontSize: '18px', marginBottom: '4px' }}>⚠️</span>
+            <strong>STREAM OFFLINE OR UNSUPPORTED</strong>
+            <span style={{ fontSize: '9.5px', color: 'var(--text-muted)', maxWidth: '240px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {src}
             </span>
           </div>
         ) : (

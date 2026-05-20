@@ -1,5 +1,3 @@
-require('dotenv').config();
-
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
@@ -15,7 +13,6 @@ app.use(express.json());
 
 // Create HTTP Server for WebSockets
 const server = http.createServer(app);
-
 const io = socketIo(server, {
   cors: {
     origin: "*",
@@ -24,12 +21,12 @@ const io = socketIo(server, {
 });
 
 // MongoDB Connection
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => {
-    console.log('MongoDB Atlas connected successfully');
-  })
-  .catch((err) => {
+const mongoURI = 'mongodb://127.0.0.1:27017/sports_dashboard';
+mongoose.connect(mongoURI)
+  .then(() => console.log('Connected successfully to MongoDB at', mongoURI))
+  .catch(err => {
     console.error('MongoDB connection error:', err);
+    console.log('Ensure MongoDB is running locally via: systemctl start mongod');
   });
 
 // Schema & Model
@@ -47,72 +44,50 @@ const highlightSchema = new mongoose.Schema({
 const Highlight = mongoose.model('Highlight', highlightSchema);
 
 // REST API Endpoints
+// POST /api/highlights
 app.post('/api/highlights', async (req, res) => {
   try {
     const { timestamp, label, camera, coordinates } = req.body;
-
     if (!timestamp || !label || !camera) {
-      return res.status(400).json({
-        error: 'Missing required fields'
-      });
+      return res.status(400).json({ error: 'Missing required fields: timestamp, label, camera' });
     }
-
-    const newHighlight = new Highlight({
-      timestamp,
-      label,
-      camera,
-      coordinates
-    });
-
+    const newHighlight = new Highlight({ timestamp, label, camera, coordinates });
     await newHighlight.save();
-
     return res.status(201).json(newHighlight);
-
   } catch (error) {
     console.error('Error saving highlight:', error);
-
-    return res.status(500).json({
-      error: 'Internal Server Error'
-    });
+    return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
+// GET /api/highlights
 app.get('/api/highlights', async (req, res) => {
   try {
-    const highlights = await Highlight.find().sort({
-      createdAt: -1
-    });
-
+    const highlights = await Highlight.find().sort({ createdAt: -1 });
     return res.status(200).json(highlights);
-
   } catch (error) {
     console.error('Error fetching highlights:', error);
-
-    return res.status(500).json({
-      error: 'Internal Server Error'
-    });
+    return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
 // WebSocket communication
 io.on('connection', (socket) => {
-
   console.log(`Client connected: ${socket.id}`);
 
+  // Listen for 'tag-moment' and immediately broadcast it to all clients via 'moment-tagged'
   socket.on('tag-moment', (data) => {
-
     console.log('Received tag-moment event:', data);
-
+    // Broadcast to ALL connected clients (including the sender, or use io.emit)
     io.emit('moment-tagged', data);
   });
 
   socket.on('disconnect', () => {
-
     console.log(`Client disconnected: ${socket.id}`);
   });
 });
 
-// Fake live sports events
+// Background Interval: emit 'live-game-event' every 5 seconds
 const eventOptions = [
   "Point scored!",
   "Foul detected",
@@ -125,26 +100,17 @@ const eventOptions = [
 ];
 
 setInterval(() => {
-
-  const randomEvent =
-    eventOptions[Math.floor(Math.random() * eventOptions.length)];
-
+  const randomEvent = eventOptions[Math.floor(Math.random() * eventOptions.length)];
   const timestamp = new Date().toLocaleTimeString();
-
   const eventPayload = {
     message: randomEvent,
     timestamp: timestamp
   };
-
   io.emit('live-game-event', eventPayload);
-
-  console.log(`Broadcasted event: ${randomEvent}`);
-
+  console.log(`Broadcasted live-game-event: "${randomEvent}"`);
 }, 5000);
 
 // Start server
 server.listen(port, () => {
-
   console.log(`Sports Replay Dashboard Backend running on port ${port}`);
-
 });
