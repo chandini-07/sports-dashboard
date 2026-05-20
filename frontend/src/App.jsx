@@ -346,13 +346,13 @@ export default function App() {
           <div className="videos-grid">
             <VideoPlayer 
               ref={cam1Ref}
-              src="https://bitdash-a.akamaihd.net/content/MI201109210084_1/m3u8s/f08e80da-bf1d-4e3d-8899-f0f6155f6efa.m3u8" 
+              src="https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8" 
               title="Camera 1" 
               cameraName="Primary Wide Angle"
             />
             <VideoPlayer 
               ref={cam2Ref}
-              src="http://sample.vodobox.net/skate_phantom_flex_4k/skate_phantom_flex_4k.m3u8" 
+              src="https://mojenatv.live/playlist.m3u8" 
               title="Camera 2" 
               cameraName="Tactical Close Stream"
             />
