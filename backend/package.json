@@ -1,0 +1,16 @@
+{
+  "name": "sports-dashboard-backend",
+  "version": "1.0.0",
+  "description": "Live Sports Replay Dashboard Backend",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^17.4.2",
+    "express": "^4.19.2",
+    "mongoose": "^8.3.1",
+    "socket.io": "^4.7.5"
+  }
+}
