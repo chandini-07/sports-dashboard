@@ -346,13 +346,13 @@ export default function App() {
           <div className="videos-grid">
             <VideoPlayer 
               ref={cam1Ref}
-              src="https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8" 
+              src="https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"
               title="Camera 1" 
               cameraName="Primary Wide Angle"
             />
             <VideoPlayer 
               ref={cam2Ref}
-              src="https://mojenatv.live/playlist.m3u8" 
+              src="https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8"
               title="Camera 2" 
               cameraName="Tactical Close Stream"
             />
