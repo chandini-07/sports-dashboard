@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 import VideoPlayer from './VideoPlayer';
 
+const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+
 export default function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [liveEvents, setLiveEvents] = useState([]);
@@ -42,7 +44,7 @@ export default function App() {
   // Fetch highlights on mount
   const fetchHighlights = async () => {
     try {
-      const response = await fetch('/api/highlights');
+      const response = await fetch(`${BACKEND}/api/highlights`);
       if (response.ok) {
         const data = await response.json();
         setHighlights(data);
@@ -98,7 +100,7 @@ export default function App() {
     fetchHighlights();
 
     // Connect to Backend WebSocket
-    const socket = io('http://localhost:5000');
+    const socket = io(BACKEND);
     socketRef.current = socket;
 
     socket.on('connect', () => {
@@ -174,7 +176,7 @@ export default function App() {
     }
 
     try {
-      const response = await fetch('/api/highlights', {
+      const response = await fetch(`${BACKEND}/api/highlights`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'

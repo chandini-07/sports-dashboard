@@ -4,6 +4,8 @@ const socketIo = require('socket.io');
 const mongoose = require('mongoose');
 const cors = require('cors');
 
+require('dotenv').config();
+
 const app = express();
 const port = process.env.PORT || 5000;
 
@@ -21,12 +23,12 @@ const io = socketIo(server, {
 });
 
 // MongoDB Connection
-const mongoURI = 'mongodb://127.0.0.1:27017/sports_dashboard';
-mongoose.connect(mongoURI)
-  .then(() => console.log('Connected successfully to MongoDB at', mongoURI))
+require('dotenv').config();
+
+mongoose.connect(process.env.MONGO_URI)
+  .then(() => console.log('MongoDB Atlas connected'))
   .catch(err => {
     console.error('MongoDB connection error:', err);
-    console.log('Ensure MongoDB is running locally via: systemctl start mongod');
   });
 
 // Schema & Model
